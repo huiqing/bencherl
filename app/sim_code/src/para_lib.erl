@@ -25,6 +25,34 @@ pmap(Fun, List, Size) ->
         {Pid, Res}-> Res
     end.
 
+%% pmap_v1(Parent, Fun, List,Size) when Size=<1->
+%%     Pids=[spawn_link(?MODULE, pmap_1, [Fun, Self, X])
+%%              ||X<-List],
+%%     [receive {Pid, Result} ->
+%%              Result end|| Pid<-Pids];    
+%% pmap_v1(Parent, Fun, List, Size) ->
+%%     ChoppedList = chop_a_list(List, Size),
+%%     Pids=[spawn_link(?MODULE, pmap_2, [Fun, Self, SubList])
+%%           ||SubList<-ChoppedList],
+%%     [receive {Pid, Result} ->
+%%             Result end|| Pid<-Pids].
+
+pmap_v(Fun, List,Size) when Size=<1->
+    Self = self(),
+    Pids=[spawn_link(?MODULE, pmap_1, [Fun, Self, X])
+             ||X<-List],
+    [receive {Pid, Result} ->
+             Result end|| Pid<-Pids];  
+pmap_v(Fun, List, Size) ->
+    Self = self(),
+    ChoppedList = chop_a_list(List, Size),
+    Pids=[spawn_link(?MODULE, pmap_2, [Fun, Self, SubList])
+          ||SubList<-ChoppedList],
+    Res=[receive {Pid, Result} ->
+             Result end|| Pid<-Pids],
+    lists:append(Res).
+
+
 pmap_0(Parent, Fun, List,Size) when Size=<1->
     Self = self(),
     Pids=[spawn_link(?MODULE, pmap_1, [Fun, Self, X])
@@ -96,6 +124,7 @@ pforeach_wait(S,N) ->
 %%-----------------------------------------%%
 %%      Utility Functions                  %%
 %%-----------------------------------------%%
+chop_a_list([], _) -> [];
 chop_a_list(List, 1) -> List;
 chop_a_list(List, Size) ->
     Len = length(List),
