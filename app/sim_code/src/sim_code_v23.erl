@@ -173,8 +173,8 @@ generalise_and_hash_file_ast_1(FName, Threshold, ASTPid, IsNewFile, SearchPaths,
     %% Refactoring2: lists:foreach to para_lib:pforeach;
     %% to avoid very small processes, we allow each process to handle 10 Forms 
     %% at the most
-    para_lib:pforeach(fun (Form) -> F(Form) end, Forms, 10).
-    
+    para_lib:pforeach(fun (Form) -> F(Form) end, Forms, 5).
+   
     
 %% generalise and hash the AST of a single function.
 generalise_and_hash_function_ast(Form, FName, true, Threshold, ASTPid) ->
@@ -1516,19 +1516,21 @@ quick_parse_annotate_file(FName, SearchPaths, TabWidth) ->
 	    {ok, {AnnAST, Info}};
 	{error, Reason} -> 
             erlang:error(Reason)
-    end.
+    end,
+    ok.
  
-%% quick_parse_annotate_file(FName, SearchPaths, TabWidth) ->
-%%     FileFormat = file_format(FName),
-%%     Ms=get_module_macros(FName, SearchPaths, TabWidth, FileFormat),
-%%     ParseRes = parse_a_file(FName, TabWidth, FileFormat),
-%%     case ParseRes of
-%% 	{ok, Forms} ->
-%%             {AnnAST, Info} = annotate_bindings(FName, Forms,Ms, TabWidth),
-%% 	    {ok, {AnnAST, Info}};
-%% 	{error, Reason} -> 
-%%             erlang:error(Reason)
-%%     end.
+quick_parse_annotate_file1(FName, SearchPaths, TabWidth) ->
+    FileFormat = file_format(FName),
+    Ms=get_module_macros(FName, SearchPaths, TabWidth, FileFormat),
+    ParseRes = parse_a_file(FName, TabWidth, FileFormat),
+    case ParseRes of
+	{ok, Forms} ->
+            {AnnAST, Info} = annotate_bindings(FName, Forms,Ms, TabWidth),
+	    {ok, {AnnAST, Info}};
+	{error, Reason} -> 
+            erlang:error(Reason)
+    end,
+    ok.
  
 get_module_macros(FName, SearchPaths, TabWidth, FileFormat) ->
     Dir = filename:dirname(FName),
@@ -1548,10 +1550,42 @@ annotate_bindings(FName, Forms, Ms, TabWidth) ->
                                   {fun() -> wrangler_comment_scan:file(FName, TabWidth) end, []}]),
     AST = recomment_forms(Forms),
     Info = analyze_forms(AST),
-    AnnAST0 = wrangler_syntax_lib:annotate_bindings(add_token_and_ranges(AST, Toks), ordsets:new(), Ms),
-    AnnAST1= wrangler_recomment:recomment_forms(AnnAST0, Comments),
-    AnnAST2 =update_toks(Toks,AnnAST1),
-    {wrangler_annotate_ast:add_fun_define_locations(AnnAST2, Info), Info}.
+    AST1 =add_token_and_ranges(AST, Toks),
+    AST2 = annotate_bindings(Ms, AST1),
+    AST3= wrangler_recomment:recomment_forms(AST2, Comments),
+    AST4 =update_toks(Toks,AST3),
+    AST5 = add_fun_define_locations(AST4, Info),
+    {AST5,Info}.
+
+annotate_bindings(Ms, AST1) ->
+    wrangler_syntax_lib:annotate_bindings(AST1, ordsets:new(), Ms).
+
+add_fun_define_locations(AST, ModInfo) ->
+    case lists:keysearch(module, 1, ModInfo) of
+	{value, {module, ModName}} -> ModName;
+	_ -> ModName = '_'
+    end,
+    Funs = fun (T, S) ->
+		   case wrangler_syntax:type(T) of
+		       function ->
+			   FunName = wrangler_syntax:data(wrangler_syntax:function_name(T)),
+			   Arity = wrangler_syntax:function_arity(T),
+			   Pos = wrangler_syntax:get_pos(T),
+			   ordsets:add_element({{ModName, FunName, Arity}, Pos}, S);
+		       _ -> S
+		   end
+	   end,
+    DefinedFuns = api_ast_traverse:fold(Funs, ordsets:new(), AST),
+    ImportedFuns = case lists:keysearch(imports, 1, ModInfo) of
+		       {value, {imports, I}} ->
+			   lists:append([[{{M, F, A}, ?DEFAULT_LOC}
+					  || {F, A} <- Fs] || {M, Fs} <- I]);
+		       _ -> []
+		   end,
+    Fs = wrangler_syntax:form_list_elements(AST),
+    Fs1 = [wrangler_annotate_ast:add_fun_def_info(F, ModName, DefinedFuns, ImportedFuns) || F <- Fs],
+    rewrite(AST, wrangler_syntax:form_list(Fs1)).
+
 
 analyze_forms(SyntaxTree) ->
     wrangler_syntax_lib:analyze_forms(SyntaxTree).
@@ -1576,18 +1610,13 @@ add_token_and_ranges(SyntaxTree, Toks) ->
 %% do it backwards starting from the last form. 
 %% all the white spaces after a form belong to the next form if
 %% there is one. 
+
 update_toks(Toks, AnnAST) ->
     Fs = wrangler_syntax:form_list_elements(AnnAST),
     NewFs=do_update_toks(lists:reverse(Toks), lists:reverse(Fs),[]),
     rewrite(AnnAST, wrangler_syntax:form_list(NewFs)).
 
-%% do_update_toks_1(Toks, Forms) ->
-%%     FormTokenPairs = get_form_tokens_1(Toks, Forms,[]),
-%%     para_lib:pmap(fun({Form, FormToks}) ->
-%%                           FormToks1 = lists:reverse(FormToks),
-%%                           update_ann(Form, {toks, FormToks1})
-%%                   end, FormTokenPairs, 20).
-    
+
 do_update_toks(_, [], NewFs) ->
     NewFs;
 do_update_toks(Toks, _Forms=[F|Fs], NewFs) ->
@@ -1600,17 +1629,22 @@ do_add_token_and_ranges(Toks, Fs) ->
     do_add_token_and_ranges1(lists:reverse(Toks), lists:reverse(Fs)).
 
 do_add_token_and_ranges1(Toks, Forms) ->
-    FormTokenPairs = get_form_tokens_1(Toks, Forms,[]),
-    para_lib:pmap(fun({Form, FormToks}) ->
+    FormTokenPairs = get_form_tokens1(Toks, Forms,[]),
+    %% lists:map(fun({Form, FormToks}) ->
+    %%                        FormToks1 = lists:reverse(FormToks),
+    %%                        Form1 = update_ann(Form, {toks, FormToks1}),
+    %%                        add_category(add_range(Form1, FormToks1))
+    %%           end, FormTokenPairs).
+    para_lib:pmap_v(fun({Form, FormToks}) ->
                           FormToks1 = lists:reverse(FormToks),
                           Form1 = update_ann(Form, {toks, FormToks1}),
                           add_category(add_range(Form1, FormToks1))
-                  end, FormTokenPairs, 5).
-get_form_tokens_1(_Toks, [], Acc) ->
+                  end, FormTokenPairs, 1).
+get_form_tokens1(_Toks, [], Acc) ->
     Acc;
-get_form_tokens_1(Toks, [F|Fs], Acc) ->
+get_form_tokens1(Toks, [F|Fs], Acc) ->
     {FormToks, RemToks} = get_tokens_for_a_form(Toks, F, Fs),
-    get_form_tokens_1(RemToks, Fs, [{F, FormToks}|Acc]).
+    get_form_tokens1(RemToks, Fs, [{F, FormToks}|Acc]).
 
                           
 %% do_add_token_and_ranges(_, [], NewFs) ->
@@ -2103,12 +2137,15 @@ extend_forwards(Toks, StartLoc, Val) ->
     end.
 
 extend_backwards(Toks, EndLoc, Val) ->
-    Toks1 = lists:dropwhile(fun (T) -> token_loc(T) =< EndLoc end, Toks),
-    Toks2 = lists:dropwhile(fun (T) -> token_val(T) =/= Val end, Toks1),
-    case Toks2 of
+    Toks1 = lists:dropwhile(fun (T) -> 
+                                    token_loc(T) =< EndLoc 
+                                        orelse 
+                                        token_val(T)=/=Val 
+                            end, Toks),
+    case Toks1 of
       [] -> EndLoc;
       _ ->
-	  {Ln, Col} = token_loc(hd(Toks2)),
+	  {Ln, Col} = token_loc(hd(Toks1)),
 	  {Ln, Col + length(atom_to_list(Val)) - 1}
     end.
 
