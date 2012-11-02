@@ -157,10 +157,12 @@ generalise_and_hash_ast(Files, Threshold, ASTPid, SearchPaths, TabWidth) ->
 generalise_and_hash_file_ast_1(FName, Threshold, ASTPid, IsNewFile, SearchPaths, TabWidth) ->
     Forms = try quick_parse_annotate_file(FName, SearchPaths, TabWidth) of
 		{ok, {AnnAST, _Info}} ->
-		    wrangler_syntax:form_list_elements(AnnAST)
+                    wrangler_syntax:form_list_elements(AnnAST)
 	    catch
-		_E1:_E2 -> []
-	    end,
+		_E1:_E2 -> 
+                    io:format("E1,E1:~p\n", [{_E1, _E2, erlang:get_stacktrace()}]),
+                    []
+            end,
     F = fun (Form) ->
 		case wrangler_syntax:type(Form) of
 		    function ->
@@ -171,9 +173,9 @@ generalise_and_hash_file_ast_1(FName, Threshold, ASTPid, IsNewFile, SearchPaths,
     %% Refactoring2: lists:foreach to para_lib:pforeach;
     %% to avoid very small processes, we allow each process to handle 10 Forms 
     %% at the most
-    %%para_lib:pforeach(fun (Form) -> F(Form) end, Forms, 5).
+    %%para_lib:pforeach(fun (Form) -> F(Form) end, Forms, 5),
     [].
-
+    
 %% generalise and hash the AST of a single function.
 generalise_and_hash_function_ast(Form, FName, true, Threshold, ASTPid) ->
     FunName = wrangler_syntax:atom_value(wrangler_syntax:function_name(Form)),
@@ -1488,53 +1490,51 @@ display_clones_2([{{{File, StartLine, StartCol}, {File, EndLine, EndCol}}, FunCa
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-rpc_call(Fun, Args) ->
-    Self = self(),
-    Pid  = spawn_link(fun() ->
-                              Res=apply(Fun, Args),
-                              Self !{self(),Res}
-                      end),
-    receive 
-        {Pid, Res} ->
-            Res
-    end. 
-
+para_call(FuncArgPairs) ->
+    Parent = self(),
+    Pids = [spawn_link(fun() ->
+                               Res=apply(Fun, Args),
+                               Parent! {self(),Res}
+                       end)||{Fun, Args}<-FuncArgPairs],
+    [receive {Pid, Result} ->
+            Result end|| Pid<-Pids].
+          
 parse_files() -> 
-    quick_parse_annotate_file("./test/refac_api.erl", [], 8).
+    quick_parse_annotate_file("./test/test.erl", [], 8).
     
 quick_parse_annotate_file(FName, SearchPaths, TabWidth) ->
     FileFormat = file_format(FName),
-    Ms = rpc_call(fun()->
-                          get_module_macros(FName, SearchPaths, TabWidth, FileFormat)
-                  end, []),
-    case parse_a_file(FName, TabWidth, FileFormat) of
+    [Ms, ParseRes] = para_call([{fun()->
+                                      get_module_macros(FName, SearchPaths, TabWidth, FileFormat)
+                                 end, []},
+                                {fun()-> parse_a_file(FName, TabWidth, FileFormat)
+                                 end, []}]),
+                               
+    case ParseRes of
 	{ok, Forms} ->
-            SyntaxTree = recomment_forms(Forms),
-	    Info = analyze_forms(SyntaxTree),
-	    AnnAST = annotate_bindings(FName, SyntaxTree, Info, Ms, TabWidth),
+            {AnnAST, Info} = annotate_bindings(FName, Forms,Ms, TabWidth),
 	    {ok, {AnnAST, Info}};
-	{error, Reason} -> erlang:error(Reason)
+	{error, Reason} -> 
+            erlang:error(Reason)
     end.
-
+ 
+%% quick_parse_annotate_file(FName, SearchPaths, TabWidth) ->
+%%     FileFormat = file_format(FName),
+%%     Ms=get_module_macros(FName, SearchPaths, TabWidth, FileFormat),
+%%     ParseRes = parse_a_file(FName, TabWidth, FileFormat),
+%%     case ParseRes of
+%% 	{ok, Forms} ->
+%%             {AnnAST, Info} = annotate_bindings(FName, Forms,Ms, TabWidth),
+%% 	    {ok, {AnnAST, Info}};
+%% 	{error, Reason} -> 
+%%             erlang:error(Reason)
+%%     end.
+ 
 get_module_macros(FName, SearchPaths, TabWidth, FileFormat) ->
     Dir = filename:dirname(FName),
     DefaultIncl2 = [filename:join(Dir, X) || X <- wrangler_misc:default_incls()],
     Includes = SearchPaths ++ DefaultIncl2,
     get_macros(FName, TabWidth, FileFormat, Includes).
-
-
-annotate_bindings(FName, AST, Info, Ms, TabWidth) ->
-    Toks = wrangler_misc:tokenize(FName, true, TabWidth),
-    AnnAST0 = wrangler_syntax_lib:annotate_bindings(add_token_and_ranges(AST, Toks), ordsets:new(), Ms),
-    Comments = wrangler_comment_scan:file(FName, TabWidth),
-    AnnAST1= wrangler_recomment:recomment_forms(AnnAST0, Comments),
-    AnnAST2 =update_toks(Toks,AnnAST1),
-    wrangler_annotate_ast:add_fun_define_locations(AnnAST1, Info).
-
-analyze_forms(SyntaxTree) ->
-    wrangler_syntax_lib:analyze_forms(SyntaxTree).
-
-recomment_forms(Forms) -> wrangler_recomment:recomment_forms(Forms, []).
 
 get_macros(FName, TabWidth, FileFormat, Includes) ->
     case wrangler_epp:parse_file(FName, Includes, [], TabWidth, FileFormat) of
@@ -1542,6 +1542,21 @@ get_macros(FName, TabWidth, FileFormat, Includes) ->
 	    {dict:from_list(MDefs), dict:from_list(MUses)};
 	_ -> []
     end.
+
+annotate_bindings(FName, Forms, Ms, TabWidth) ->
+    [Toks, Comments] = para_call([{fun() -> wrangler_misc:tokenize(FName, true, TabWidth) end, []},
+                                  {fun() -> wrangler_comment_scan:file(FName, TabWidth) end, []}]),
+    AST = recomment_forms(Forms),
+    Info = analyze_forms(AST),
+    AnnAST0 = wrangler_syntax_lib:annotate_bindings(add_token_and_ranges(AST, Toks), ordsets:new(), Ms),
+    AnnAST1= wrangler_recomment:recomment_forms(AnnAST0, Comments),
+    AnnAST2 =update_toks(Toks,AnnAST1),
+    {wrangler_annotate_ast:add_fun_define_locations(AnnAST2, Info), Info}.
+
+analyze_forms(SyntaxTree) ->
+    wrangler_syntax_lib:analyze_forms(SyntaxTree).
+
+recomment_forms(Forms) -> wrangler_recomment:recomment_forms(Forms, []).
 
 parse_a_file(FName, TabWidth, FileFormat) ->
     wrangler_epp_dodger:parse_file(FName, [{tab, TabWidth}, {format, FileFormat}]).
@@ -1570,7 +1585,7 @@ update_toks(Toks, AnnAST) ->
 do_update_toks(_, [], NewFs) ->
     NewFs;
 do_update_toks(Toks, _Forms=[F|Fs], NewFs) ->
-    {FormToks0, RemToks} = get_form_tokens(Toks, F, Fs), 
+    {FormToks0, RemToks} = get_tokens_for_a_form(Toks, F, Fs),
     FormToks = lists:reverse(FormToks0),
     F1 = update_ann(F, {toks, FormToks}),
     do_update_toks(RemToks, Fs, [F1| NewFs]).
@@ -1588,7 +1603,7 @@ do_add_token_and_ranges1(Toks, Forms) ->
 get_form_tokens1(_Toks, [], Acc) ->
     Acc;
 get_form_tokens1(Toks, [F|Fs], Acc) ->
-    {FormToks, RemToks} = get_form_tokens(Toks,F, Fs),
+    {FormToks, RemToks} = get_tokens_for_a_form(Toks, F, Fs),
     get_form_tokens1(RemToks, Fs, [{F, FormToks}|Acc]).
 
                           
@@ -1601,7 +1616,7 @@ get_form_tokens1(Toks, [F|Fs], Acc) ->
 %%     F2 = add_category(add_range(F1, FormToks)),
 %%     do_add_token_and_ranges(RemToks, Fs, [F2| NewFs]).
 
-get_form_tokens(Toks, F, Fs) ->
+get_tokens_for_a_form(Toks, F, Fs) ->
     case wrangler_syntax:type(F) of
 	comment ->
 	    get_comment_form_toks(Toks, F, Fs);
@@ -2144,8 +2159,8 @@ do_add_category(Node, C) ->
 	    Ps = wrangler_syntax:clause_patterns(Node),
 	    G = wrangler_syntax:clause_guard(Node),
 	    Body1 = [add_category(B, expression)||B<-Body],
-	    Ps1 = [add_category(P, pattern)||P<-Ps]
-,	    G1 = case G of
+	    Ps1 = [add_category(P, pattern)||P<-Ps],
+	    G1 = case G of
 		     none -> none;
 		     _ -> add_category(G, guard_expression)
 		 end,
