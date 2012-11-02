@@ -1576,18 +1576,17 @@ add_token_and_ranges(SyntaxTree, Toks) ->
 %% do it backwards starting from the last form. 
 %% all the white spaces after a form belong to the next form if
 %% there is one. 
-
 update_toks(Toks, AnnAST) ->
     Fs = wrangler_syntax:form_list_elements(AnnAST),
-    NewFs=do_update_toks_1(lists:reverse(Toks), lists:reverse(Fs)),
+    NewFs=do_update_toks(lists:reverse(Toks), lists:reverse(Fs),[]),
     rewrite(AnnAST, wrangler_syntax:form_list(NewFs)).
 
-do_update_toks_1(Toks, Forms) ->
-    FormTokenPairs = get_form_tokens_1(Toks, Forms,[]),
-    para_lib:pmap(fun({Form, FormToks}) ->
-                          FormToks1 = lists:reverse(FormToks),
-                          update_ann(Form, {toks, FormToks1})
-                  end, FormTokenPairs, 10).
+%% do_update_toks_1(Toks, Forms) ->
+%%     FormTokenPairs = get_form_tokens_1(Toks, Forms,[]),
+%%     para_lib:pmap(fun({Form, FormToks}) ->
+%%                           FormToks1 = lists:reverse(FormToks),
+%%                           update_ann(Form, {toks, FormToks1})
+%%                   end, FormTokenPairs, 20).
     
 do_update_toks(_, [], NewFs) ->
     NewFs;
@@ -1606,7 +1605,7 @@ do_add_token_and_ranges1(Toks, Forms) ->
                           FormToks1 = lists:reverse(FormToks),
                           Form1 = update_ann(Form, {toks, FormToks1}),
                           add_category(add_range(Form1, FormToks1))
-                  end, FormTokenPairs).
+                  end, FormTokenPairs, 5).
 get_form_tokens_1(_Toks, [], Acc) ->
     Acc;
 get_form_tokens_1(Toks, [F|Fs], Acc) ->
