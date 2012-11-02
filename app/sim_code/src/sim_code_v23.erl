@@ -173,8 +173,8 @@ generalise_and_hash_file_ast_1(FName, Threshold, ASTPid, IsNewFile, SearchPaths,
     %% Refactoring2: lists:foreach to para_lib:pforeach;
     %% to avoid very small processes, we allow each process to handle 10 Forms 
     %% at the most
-    %%para_lib:pforeach(fun (Form) -> F(Form) end, Forms, 5),
-    [].
+    para_lib:pforeach(fun (Form) -> F(Form) end, Forms, 10).
+    
     
 %% generalise and hash the AST of a single function.
 generalise_and_hash_function_ast(Form, FName, true, Threshold, ASTPid) ->
@@ -1579,9 +1579,16 @@ add_token_and_ranges(SyntaxTree, Toks) ->
 
 update_toks(Toks, AnnAST) ->
     Fs = wrangler_syntax:form_list_elements(AnnAST),
-    NewFs=do_update_toks(lists:reverse(Toks), lists:reverse(Fs), []),
+    NewFs=do_update_toks_1(lists:reverse(Toks), lists:reverse(Fs)),
     rewrite(AnnAST, wrangler_syntax:form_list(NewFs)).
 
+do_update_toks_1(Toks, Forms) ->
+    FormTokenPairs = get_form_tokens_1(Toks, Forms,[]),
+    para_lib:pmap(fun({Form, FormToks}) ->
+                          FormToks1 = lists:reverse(FormToks),
+                          update_ann(Form, {toks, FormToks1})
+                  end, FormTokenPairs, 10).
+    
 do_update_toks(_, [], NewFs) ->
     NewFs;
 do_update_toks(Toks, _Forms=[F|Fs], NewFs) ->
@@ -1594,17 +1601,17 @@ do_add_token_and_ranges(Toks, Fs) ->
     do_add_token_and_ranges1(lists:reverse(Toks), lists:reverse(Fs)).
 
 do_add_token_and_ranges1(Toks, Forms) ->
-    FormTokenPairs = get_form_tokens1(Toks, Forms,[]),
+    FormTokenPairs = get_form_tokens_1(Toks, Forms,[]),
     para_lib:pmap(fun({Form, FormToks}) ->
                           FormToks1 = lists:reverse(FormToks),
                           Form1 = update_ann(Form, {toks, FormToks1}),
                           add_category(add_range(Form1, FormToks1))
                   end, FormTokenPairs).
-get_form_tokens1(_Toks, [], Acc) ->
+get_form_tokens_1(_Toks, [], Acc) ->
     Acc;
-get_form_tokens1(Toks, [F|Fs], Acc) ->
+get_form_tokens_1(Toks, [F|Fs], Acc) ->
     {FormToks, RemToks} = get_tokens_for_a_form(Toks, F, Fs),
-    get_form_tokens1(RemToks, Fs, [{F, FormToks}|Acc]).
+    get_form_tokens_1(RemToks, Fs, [{F, FormToks}|Acc]).
 
                           
 %% do_add_token_and_ranges(_, [], NewFs) ->
