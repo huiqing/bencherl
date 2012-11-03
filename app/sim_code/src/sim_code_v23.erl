@@ -512,15 +512,24 @@ hash_a_clone_candidate(_C={Ranges, {_Len, _Freq}}) ->
 		  ||R<-Ranges])).
 %% examine a  clone candidate.
 examine_a_clone_candidate(_C={Ranges, {_Len, _Freq}}, Thresholds) ->
-    RangesWithExprAST=[attach_expr_ast_to_ranges(R)|| R<-Ranges],
+  %%  RangesWithExprAST=[attach_expr_ast_to_ranges(R)|| R<-Ranges],
+    RangesWithExprAST=para_lib:pmap(fun(R)->
+                                            attach_expr_ast_to_ranges(R)
+                                    end, Ranges),                                    
     Clones = examine_clone_class_members(RangesWithExprAST, Thresholds,[]),
-    ClonesWithAU = [begin
-			FromSameFile=from_same_file(Rs),
-                        AU= get_anti_unifier(Info, FromSameFile),
-                        {Rs1, AU1} = attach_fun_call_to_range(Rs, AU, FromSameFile),
-                        {Rs1, {Len, length(Rs1)}, AU1}
-		    end
-		    || {Rs, {Len, _}, Info} <- Clones],
+    ClonesWithAU = lists:pmap(fun({Rs, {Len, _}, Info}) ->
+                                      FromSameFile=from_same_file(Rs),
+                                      AU= get_anti_unifier(Info, FromSameFile),
+                                      {Rs1, AU1} = attach_fun_call_to_range(Rs, AU, FromSameFile),
+                                      {Rs1, {Len, length(Rs1)}, AU1}
+                              end, Clones),
+     %% ClonesWithAU = [begin
+     %%    		FromSameFile=from_same_file(Rs),
+     %%                    AU= get_anti_unifier(Info, FromSameFile),
+     %%                    {Rs1, AU1} = attach_fun_call_to_range(Rs, AU, FromSameFile),
+     %%                    {Rs1, {Len, length(Rs1)}, AU1}
+     %%    	    end
+     %%    	    || {Rs, {Len, _}, Info} <- Clones],
     [{Rs1, {Len, F}, AU1}||{Rs1, {Len, F}, AU1}<-ClonesWithAU,
                            F>=Thresholds#threshold.min_freq].
  
