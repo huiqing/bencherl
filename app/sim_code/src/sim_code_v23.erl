@@ -462,26 +462,6 @@ examine_a_clone_candidate({C,Nth},Thresholds,CloneCheckerPid,HashPid) ->
                     add_new_clones(CloneCheckerPid,{C2, ClonesWithAU})
             end
     end.
- 
-%% examine_clone_candidates([],_Thresholds,CloneCheckerPid,_HashPid,_Num) ->
-%%     get_final_clone_classes(CloneCheckerPid,ast_tab);
-%% examine_clone_candidates([C| Cs],Thresholds,CloneCheckerPid,HashPid,Num) ->
-%%     output_progress_msg(Num), 
-%%     C1 = get_clone_in_range(HashPid,C),
-%%     MinToks = Thresholds#threshold.min_toks, 
-%%     MinFreq = Thresholds#threshold.min_freq, 
-%%     case remove_short_clones(C1,MinToks,MinFreq) of
-%%       [] ->
-%% 	  ok;
-%%       [C2] ->
-%%             case examine_a_clone_candidate(C2,Thresholds) of
-%% 	    [] ->
-%% 		ok;
-%% 	    ClonesWithAU ->
-%%                   add_new_clones(CloneCheckerPid,{C2, ClonesWithAU})
-%% 	  end
-%%     end, 
-%%     examine_clone_candidates(Cs,Thresholds,CloneCheckerPid,HashPid,Num+1).
 
 output_progress_msg(Num) ->
     case Num rem 10 of
@@ -501,8 +481,7 @@ hash_a_clone_candidate(_C={Ranges, {_Len, _Freq}}) ->
 		  ||R<-Ranges])).
 %% examine a  clone candidate.
 examine_a_clone_candidate(_C={Ranges, {_Len, _Freq}}, Thresholds) ->
-    ASTTab = ast_tab,
-    RangesWithExprAST=[attach_expr_ast_to_ranges(R, ASTTab)|| R<-Ranges],
+    RangesWithExprAST=[attach_expr_ast_to_ranges(R)|| R<-Ranges],
     Clones = examine_clone_class_members(RangesWithExprAST, Thresholds,[]),
     ClonesWithAU = [begin
 			FromSameFile=from_same_file(Rs),
@@ -515,9 +494,9 @@ examine_a_clone_candidate(_C={Ranges, {_Len, _Freq}}, Thresholds) ->
                            F>=Thresholds#threshold.min_freq].
  
 
-attach_expr_ast_to_ranges(Rs, ASTTab) ->
+attach_expr_ast_to_ranges(Rs) ->
     [{R, ExpAST}||R={ExprKey, _Toks, _Loc, _IsNew}<-Rs, 
-		  {_Key, ExpAST}<-ets:lookup(ASTTab, ExprKey)].
+		  {_Key, ExpAST}<-ets:lookup(ast_tab, ExprKey)].
 
 
 %% check the clone members of a clone candidate using 
@@ -540,10 +519,11 @@ examine_clone_class_members(RangesWithExprAST, Thresholds,Acc) ->
     %% try to anti_unify each of the remaining candidate clone members 
     %% with the first candidate clone member.
 
-    Res = [do_anti_unification(RangeWithExprAST1, RangeWithExprAST2)
-	   || RangeWithExprAST2<-Rs],
-
-
+    %% Res = [do_anti_unification(RangeWithExprAST1, RangeWithExprAST2)
+    %%        || RangeWithExprAST2<-Rs],
+    Res = para_lib:pmap(fun(RangeWithExprAST2) ->
+                                do_anti_unification(RangeWithExprAST1, RangeWithExprAST2)
+                        end, Rs, 10),
     %% process the anti_unification result.
     Clones = process_au_result(Res, Thresholds),
 
@@ -874,9 +854,12 @@ remove_sub_clone_pairs([CP={Rs, _,_}|CPs], Acc) ->
 %% derive clone classes from clone pairs.	
 get_clone_classes(ClonePairs,Thresholds) ->
     RangeGroups = lists:usort([Rs1 || {Rs1, _Rs2, _Subst} <- ClonePairs]),
-    CloneClasses = lists:append([get_one_clone_class(Range, ClonePairs, Thresholds) 
-				 || Range <- RangeGroups]),
-    lists:keysort(2, CloneClasses).
+    CloneClassList = para_lib:pmap(fun(Range) ->
+                                               get_one_clone_class(Range, ClonePairs, Thresholds) 
+                                       end, RangeGroups),
+    %% CloneClasses =[get_one_clone_class(Range, ClonePairs, Thresholds) 
+    %%     			 || Range <- RangeGroups],
+    lists:keysort(2, lists:append(CloneClassList)).
  
 get_one_clone_class(RangeWithExprAST, ClonePairs, Thresholds) ->
     Res = lists:append([get_one_clone_class_1(RangeWithExprAST, ClonePair)
@@ -1516,8 +1499,8 @@ quick_parse_annotate_file(FName, SearchPaths, TabWidth) ->
 	    {ok, {AnnAST, Info}};
 	{error, Reason} -> 
             erlang:error(Reason)
-    end,
-    ok.
+    end.
+ 
  
 quick_parse_annotate_file1(FName, SearchPaths, TabWidth) ->
     FileFormat = file_format(FName),
@@ -1529,8 +1512,8 @@ quick_parse_annotate_file1(FName, SearchPaths, TabWidth) ->
 	    {ok, {AnnAST, Info}};
 	{error, Reason} -> 
             erlang:error(Reason)
-    end,
-    ok.
+    end.
+  
  
 get_module_macros(FName, SearchPaths, TabWidth, FileFormat) ->
     Dir = filename:dirname(FName),
