@@ -405,35 +405,59 @@ stop_clone_check_process(Pid) ->
 add_new_clones(Pid, Clones) ->
     Pid ! {add_clone, Clones}.
 
-get_final_clone_classes(Pid, ASTTab) ->
-    Pid ! {get_clones, self(), ASTTab},
+get_final_clone_classes(Pid) ->
+    Pid ! {get_clones, self()},
     receive
         {Pid, Cs} ->
 	  Cs
     end.
 
-clone_check_loop(Cs, CandidateClassPairs) ->
+clone_check_loop(Cs, CsRanges) ->
     receive
-	{add_clone,  {Candidate, Clones}} ->
+	{add_clone,  {_Candidate, Clones}} ->
             Clones1=[get_clone_class_in_absolute_locs(Clone) 
 		     || Clone <- Clones],
-            clone_check_loop(Clones1++Cs, [{hash_a_clone_candidate(Candidate), Clones}
-                                           |CandidateClassPairs]);
-	{get_clones, From, _ASTTab} ->
+            {Clones2, Clones2Ranges} = non_sub_clones(Clones1, CsRanges),
+            clone_check_loop(Clones2++Cs, Clones2Ranges++CsRanges);
+	{get_clones, From} ->
 	    ?debug("TIME3:\n~p\n", [time()]),
-	    {TimeToRemoveSubClones,Cs0}=timer:tc(?MODULE, remove_sub_clones, [Cs]),
-            io:format("Time to remove subclones:\n~p\n", [TimeToRemoveSubClones/1000]),
+	   %% {TimeToRemoveSubClones,Cs0}=timer:tc(?MODULE, remove_sub_clones, [Cs]),
+           %% io:format("Time to remove subclones:\n~p\n", [TimeToRemoveSubClones/1000]),
 	    Cs1=[{AbsRanges, Len, Freq, AntiUnifier}||
-		    {_, {Len, Freq}, AntiUnifier,AbsRanges}<-Cs0],
+		    {_, {Len, Freq}, AntiUnifier,AbsRanges}<-Cs],
 	    From ! {self(), Cs1},
-	    clone_check_loop(Cs, CandidateClassPairs);       
+	    clone_check_loop(Cs, CsRanges);       
 	stop ->
             ets:delete(clone_tab),
             ok;            
 	_Msg -> 
 	    ?wrangler_io("Unexpected message:\n~p\n",[_Msg]),
-	    clone_check_loop(Cs,  CandidateClassPairs)
+	    clone_check_loop(Cs,  CsRanges)
     end.
+ 
+
+%% clone_check_loop(Cs, CandidateClassPairs) ->
+%%     receive
+%% 	{add_clone,  {Candidate, Clones}} ->
+%%             Clones1=[get_clone_class_in_absolute_locs(Clone) 
+%% 		     || Clone <- Clones],
+%%             clone_check_loop(Clones1++Cs, [{hash_a_clone_candidate(Candidate), Clones}
+%%                                            |CandidateClassPairs]);
+%% 	{get_clones, From, _ASTTab} ->
+%% 	    ?debug("TIME3:\n~p\n", [time()]),
+%% 	    {TimeToRemoveSubClones,Cs0}=timer:tc(?MODULE, remove_sub_clones, [Cs]),
+%%             io:format("Time to remove subclones:\n~p\n", [TimeToRemoveSubClones/1000]),
+%% 	    Cs1=[{AbsRanges, Len, Freq, AntiUnifier}||
+%% 		    {_, {Len, Freq}, AntiUnifier,AbsRanges}<-Cs0],
+%% 	    From ! {self(), Cs1},
+%% 	    clone_check_loop(Cs, CandidateClassPairs);       
+%% 	stop ->
+%%             ets:delete(clone_tab),
+%%             ok;            
+%% 	_Msg -> 
+%% 	    ?wrangler_io("Unexpected message:\n~p\n",[_Msg]),
+%% 	    clone_check_loop(Cs,  CandidateClassPairs)
+%%     end.
  
 %%=============================================================================
 %% check each candidate clone, and drive real clone classes.
@@ -445,7 +469,7 @@ examine_clone_candidates(Cs, Thresholds, CloneCheckerPid, HashPid) ->
     para_lib:pforeach(fun({C, Nth}) ->
                               examine_a_clone_candidate({C,Nth},Thresholds, CloneCheckerPid, HashPid)
                      end,NumberedCs),
-    get_final_clone_classes(CloneCheckerPid, ast_tab).
+    get_final_clone_classes(CloneCheckerPid).
  
 examine_a_clone_candidate({C,Nth},Thresholds,CloneCheckerPid,HashPid) ->
    %% output_progress_msg(Nth), 
@@ -1062,12 +1086,17 @@ remove_sub_clones([C|Cs], AccRanges,Acc_Cs) ->
 	false ->remove_sub_clones(Cs, [CloneRanges|AccRanges], [C|Acc_Cs])
     end.
 
-%% is_sub_clone(CloneRanges,AccRanges) ->
-%%     Res=para_lib:pmap(fun(Ranges) -> 
-%%                               is_sub_ranges(CloneRanges, Ranges)
-%%                       end, AccRanges),
-%%     lists:member(true, Res).
-   
+non_sub_clones(Clones1, Clones2Ranges) ->
+    Res =para_lib:pmap(fun(C1) ->
+                            C1Ranges = element(1, C1),
+                            case is_sub_clone(C1Ranges, Clones2Ranges) of 
+                                true -> [];
+                                false -> [{C1, C1Ranges}]
+                            end
+                    end, Clones1),
+    lists:unzip(lists:append(Res)).
+
+ 
 is_sub_clone(_CloneRanges, []) ->
     false;
 is_sub_clone(CloneRanges, [CRanges|CsRanges]) ->
