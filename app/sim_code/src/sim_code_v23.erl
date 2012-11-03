@@ -1051,46 +1051,31 @@ make_fun_call(FunName, Pats, Subst, FromSameFile) ->
 %%                                                                  %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 remove_sub_clones(Cs) ->
-    remove_sub_clones(lists:reverse(lists:keysort(2,Cs)),[]).
-remove_sub_clones([], Acc_Cs) ->
+    remove_sub_clones(lists:reverse(lists:keysort(2,Cs)),[],[]).
+remove_sub_clones([], _, Acc_Cs) ->
     lists:reverse(Acc_Cs);
-remove_sub_clones([C|Cs], Acc_Cs) ->
-    case is_sub_clone(C, Acc_Cs) of
+remove_sub_clones([C|Cs], AccRanges,Acc_Cs) ->
+    CloneRanges = element(1, C),
+    case is_sub_clone(CloneRanges, AccRanges) of
 	true -> 
-	    remove_sub_clones(Cs, Acc_Cs);
-	false ->remove_sub_clones(Cs, [C|Acc_Cs])
+	    remove_sub_clones(Cs, AccRanges, Acc_Cs);
+	false ->remove_sub_clones(Cs, [CloneRanges|AccRanges], [C|Acc_Cs])
     end.
 
-is_sub_clone({Ranges, {Len, Freq},Str,AbsRanges}, ExistingClones) ->
-    case ExistingClones of 
-	[] -> false;
-	[{Ranges1, {_Len1, _Freq1}, _, _AbsRanges1}|T] ->
-	    case is_sub_ranges(Ranges, Ranges1) of 
-		true -> 
-		    true;
-		false -> is_sub_clone({Ranges, {Len, Freq},Str, AbsRanges}, T)
-	    end
-	end;
-
-is_sub_clone({Ranges, {Len, Freq},Str}, ExistingClones) ->
-    case ExistingClones of 
-	[] -> false;
-	[{Ranges1, {_Len1, _Freq1}, _}|T] ->
-	    case is_sub_ranges(Ranges, Ranges1) of 
-		true -> 
-		    true;
-		false -> is_sub_clone({Ranges, {Len, Freq},Str}, T)
-	    end
-    end;
-is_sub_clone({Ranges, {Len, Freq}}, ExistingClones) ->
-    case ExistingClones of 
-	[] -> false;
-	[{Ranges1, {_Len1, _Freq1}}|T] ->
-	    case is_sub_ranges(Ranges, Ranges1) of 
-		true -> 
-		    true;
-		false -> is_sub_clone({Ranges, {Len, Freq}}, T)
-	    end
+%% is_sub_clone(CloneRanges,AccRanges) ->
+%%     Res=para_lib:pmap(fun(Ranges) -> 
+%%                               is_sub_ranges(CloneRanges, Ranges)
+%%                       end, AccRanges),
+%%     lists:member(true, Res).
+   
+is_sub_clone(_CloneRanges, []) ->
+    false;
+is_sub_clone(CloneRanges, [CRanges|CsRanges]) ->
+    case is_sub_ranges(CloneRanges, CRanges) of 
+        true ->
+            true;
+        false ->
+            is_sub_clone(CloneRanges, CsRanges)
     end.
 
 is_sub_ranges(Ranges1, Ranges2) ->
