@@ -406,10 +406,12 @@ add_new_clones(Pid, Clones) ->
     Pid ! {add_clone, Clones}.
 
 get_final_clone_classes(Pid) ->
+    io:format("TIME2:\n~p\n", [time()]),
     Pid ! {get_clones, self()},
     receive
         {Pid, Cs} ->
-	  Cs
+            io:format("TIME4:\n~p\n", [time()]),
+            Cs
     end.
 
 clone_check_loop(Cs, CsRanges) ->
@@ -421,7 +423,7 @@ clone_check_loop(Cs, CsRanges) ->
             {Cs1, Cs1Ranges} = non_sub_clones(Cs, Clones2Ranges),
             clone_check_loop(Clones2++Cs1, Clones2Ranges++Cs1Ranges);
 	{get_clones, From} ->
-	    ?debug("TIME3:\n~p\n", [time()]),
+	    io:format("TIME3:\n~p\n", [time()]),
 	    Cs1=[{AbsRanges, Len, Freq, AntiUnifier}||
 		    {_, {Len, Freq}, AntiUnifier,AbsRanges}<-Cs],
 	    From ! {self(), Cs1},
