@@ -421,7 +421,8 @@ clone_check_loop(Cs, CandidateClassPairs) ->
                                            |CandidateClassPairs]);
 	{get_clones, From, _ASTTab} ->
 	    ?debug("TIME3:\n~p\n", [time()]),
-	    Cs0=remove_sub_clones(Cs),
+	    {TimeToRemoveSubClones,Cs0}=timer:tc(?MODULE, remove_sub_clones, [Cs]),
+            io:format("Time to remove subclones:\n~p\n", [TimeToRemoveSubClones/1000]),
 	    Cs1=[{AbsRanges, Len, Freq, AntiUnifier}||
 		    {_, {Len, Freq}, AntiUnifier,AbsRanges}<-Cs0],
 	    From ! {self(), Cs1},
