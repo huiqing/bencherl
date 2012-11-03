@@ -418,11 +418,10 @@ clone_check_loop(Cs, CsRanges) ->
             Clones1=[get_clone_class_in_absolute_locs(Clone) 
 		     || Clone <- Clones],
             {Clones2, Clones2Ranges} = non_sub_clones(Clones1, CsRanges),
-            clone_check_loop(Clones2++Cs, Clones2Ranges++CsRanges);
+            {Cs1, Cs1Ranges} = non_sub_clones(Cs, Clones2Ranges),
+            clone_check_loop(Clones2++Cs1, Clones2Ranges++Cs1Ranges);
 	{get_clones, From} ->
 	    ?debug("TIME3:\n~p\n", [time()]),
-	   %% {TimeToRemoveSubClones,Cs0}=timer:tc(?MODULE, remove_sub_clones, [Cs]),
-           %% io:format("Time to remove subclones:\n~p\n", [TimeToRemoveSubClones/1000]),
 	    Cs1=[{AbsRanges, Len, Freq, AntiUnifier}||
 		    {_, {Len, Freq}, AntiUnifier,AbsRanges}<-Cs],
 	    From ! {self(), Cs1},
@@ -466,9 +465,13 @@ clone_check_loop(Cs, CsRanges) ->
 %% Refactoring5: turn lists:foreach into para_lib:pforeach.
 examine_clone_candidates(Cs, Thresholds, CloneCheckerPid, HashPid) ->
     NumberedCs = lists:zip(Cs, lists:seq(1, length(Cs))),
+    Time1 =now(),
     para_lib:pforeach(fun({C, Nth}) ->
                               examine_a_clone_candidate({C,Nth},Thresholds, CloneCheckerPid, HashPid)
                      end,NumberedCs),
+    Time2 = now(),
+    TotalTime  = timer:now_diff(Time2, Time1),
+    io:format("Time for clone examination:~p\n", [TotalTime/1000]),
     get_final_clone_classes(CloneCheckerPid).
  
 examine_a_clone_candidate({C,Nth},Thresholds,CloneCheckerPid,HashPid) ->
