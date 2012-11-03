@@ -517,7 +517,7 @@ examine_a_clone_candidate(_C={Ranges, {_Len, _Freq}}, Thresholds) ->
                                             attach_expr_ast_to_ranges(R)
                                     end, Ranges),                                    
     Clones = examine_clone_class_members(RangesWithExprAST, Thresholds,[]),
-    ClonesWithAU = lists:pmap(fun({Rs, {Len, _}, Info}) ->
+    ClonesWithAU = para_lib:pmap(fun({Rs, {Len, _}, Info}) ->
                                       FromSameFile=from_same_file(Rs),
                                       AU= get_anti_unifier(Info, FromSameFile),
                                       {Rs1, AU1} = attach_fun_call_to_range(Rs, AU, FromSameFile),
@@ -563,7 +563,7 @@ examine_clone_class_members(RangesWithExprAST, Thresholds,Acc) ->
     %%        || RangeWithExprAST2<-Rs],
     Res = para_lib:pmap(fun(RangeWithExprAST2) ->
                                 do_anti_unification(RangeWithExprAST1, RangeWithExprAST2)
-                        end, Rs, 10),
+                        end, Rs, 1),
     %% process the anti_unification result.
     Clones = process_au_result(Res, Thresholds),
 
