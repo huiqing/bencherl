@@ -419,9 +419,10 @@ clone_check_loop(Cs, CsRanges) ->
 	{add_clone,  {_Candidate, Clones}} ->
             Clones1=[get_clone_class_in_absolute_locs(Clone) 
 		     || Clone <- Clones],
-            {Clones2, Clones2Ranges} = non_sub_clones(Clones1, CsRanges),
-            {Cs1, Cs1Ranges} = non_sub_clones(Cs, Clones2Ranges),
-            clone_check_loop(Clones2++Cs1, Clones2Ranges++Cs1Ranges);
+            %% {Clones2, Clones2Ranges} = non_sub_clones(Clones1, CsRanges),
+            %% {Cs1, Cs1Ranges} = non_sub_clones(Cs, Clones2Ranges),
+            %% clone_check_loop(Clones2++Cs1, Clones2Ranges++Cs1Ranges);
+            clone_check_loop(Clones1++Cs, CsRanges);
 	{get_clones, From} ->
 	    io:format("TIME3:\n~p\n", [time()]),
 	    Cs1=[{AbsRanges, Len, Freq, AntiUnifier}||
