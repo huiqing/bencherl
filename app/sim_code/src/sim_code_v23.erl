@@ -129,11 +129,12 @@ gen_initial_clone_candidates(Files, Thresholds, HashPid) ->
     process_initial_clones(Cs0).
    
 process_initial_clones(Cs) ->
+    io:format("\n~p\n", [{length(sets:to_list(sets:from_list(Cs))), length(Cs)}]),
     [begin
 	 Rs1 =sets:to_list(sets:from_list(Rs)),
 	 {Rs1, Len, length(Rs1)}
      end
-     ||{Rs, Len, _Freq}<-Cs].
+     ||{Rs, Len, _Freq}<-sets:to_list(sets:from_list(Cs))].
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%                                                                                 %%
