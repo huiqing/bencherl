@@ -469,9 +469,9 @@ clone_check_loop(Cs, CsRanges) ->
 examine_clone_candidates(Cs, Thresholds, CloneCheckerPid, HashPid) ->
     NumberedCs = lists:zip(Cs, lists:seq(1, length(Cs))),
     Time1 =now(),
-    para_lib:pforeach(fun({C, Nth}) ->
-                              examine_a_clone_candidate({C,Nth},Thresholds, CloneCheckerPid, HashPid)
-                     end,NumberedCs),
+    pforeach(fun({C, Nth}) ->
+                     examine_a_clone_candidate({C,Nth},Thresholds, CloneCheckerPid, HashPid)
+             end,NumberedCs),
     Time2 = now(),
     TotalTime  = timer:now_diff(Time2, Time1),
     io:format("Time for clone examination:~p\n", [TotalTime/1000]),
@@ -2374,3 +2374,29 @@ adjust_implicit_fun_loc(T, Toks)->
 update_ann(Node, Ann) ->
     wrangler_misc:update_ann(Node, Ann).
 
+
+
+
+pforeach(Fun, List)->
+    Self = self(),
+    Pid = spawn_link(?MODULE, pforeach_0, [Self, Fun, List]),
+    receive 
+        Pid -> ok
+    end.
+pforeach_0(Parent, Fun, List)->
+    Self = self(),
+    _Pids = [spawn_link(?MODULE, pforeach_1, [Fun, Self, X])
+             || X <- List],
+    pforeach_wait(Self, length(List)),
+    Parent ! Self.
+
+pforeach_1(Fun, Parent, X) ->
+    _ =  (catch Fun(X)),
+    Parent ! Parent.
+
+pforeach_wait(_S,0) -> ok;
+pforeach_wait(S,N) ->
+    io:format("wait for N:\n~p\n", [N]),
+    receive
+        S -> pforeach_wait(S,N-1)
+    end.
