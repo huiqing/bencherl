@@ -80,8 +80,8 @@ sim_code_detection(DirFileList,MinLen1,MinToks1,MinFreq1,MaxVars1,SimiScore1,Sea
              TotalTime  = timer:now_diff(EndTime, StartTime),
              io:format("TimeUsed:\n~p\n", [{{Time1/1000, Time1/TotalTime*100}, {Time2/1000, Time2/TotalTime*100},
                                             {Time3/1000, Time3/TotalTime*100}, {Time4/1000, Time4/TotalTime*100}, 
-                                            TotalTime/1000}]),
-             display_clones_by_freq(lists:reverse(Cs), "Similar")
+                                            TotalTime/1000}])
+             %%display_clones_by_freq(lists:reverse(Cs), "Similar")
     end,
     {ok, "Similar code detection finished."}.
 
@@ -430,7 +430,7 @@ clone_check_loop(Cs, CsRanges) ->
 	    io:format("TIME3:\n~p\n", [time()]),
             Cs1 = remove_sub_clones(Cs),
 	    Cs2=[{AbsRanges, Len, Freq, AntiUnifier}||
-		    {_, {Len, Freq}, AntiUnifier,AbsRanges}<-Cs],
+		    {_, {Len, Freq}, AntiUnifier,AbsRanges}<-Cs1],
             From ! {self(), Cs2},
 	    clone_check_loop(Cs, CsRanges);       
 	stop ->
@@ -474,7 +474,8 @@ examine_clone_candidates(Cs, Thresholds, CloneCheckerPid, HashPid) ->
     NumberedCs = lists:zip(Cs, lists:seq(1, length(Cs))),
     Time1 =now(),
     pforeach(fun({C, Nth}) ->
-                     examine_a_clone_candidate({C,Nth},Thresholds, CloneCheckerPid, HashPid)
+                     {Time, _}=timer:tc(?MODULE,examine_a_clone_candidate,[{C,Nth},Thresholds, CloneCheckerPid, HashPid]),
+                      io:format("exmaine a clone candidate:~p\n", [Time/1000])
              end,NumberedCs),
     Time2 = now(),
     TotalTime  = timer:now_diff(Time2, Time1),
