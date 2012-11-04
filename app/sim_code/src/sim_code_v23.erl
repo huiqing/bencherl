@@ -475,7 +475,12 @@ examine_clone_candidates(Cs, Thresholds, CloneCheckerPid, HashPid) ->
     Time1 =now(),
     pforeach(fun({C, Nth}) ->
                      {Time, _}=timer:tc(?MODULE,examine_a_clone_candidate,[{C,Nth},Thresholds, CloneCheckerPid, HashPid]),
-                      io:format("exmaine a clone candidate:~p\n", [Time/1000])
+                     case Time/1000 >80000 of 
+                         true ->
+                             io:format("exmaine a clone candidate:~p\n", [{Time/1000, C}]);
+                         false ->
+                             io:format("exmaine a clone candidate:~p\n", [Time/1000])
+                     end
              end,NumberedCs),
     Time2 = now(),
     TotalTime  = timer:now_diff(Time2, Time1),
