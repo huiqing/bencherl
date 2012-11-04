@@ -80,8 +80,8 @@ sim_code_detection(DirFileList,MinLen1,MinToks1,MinFreq1,MaxVars1,SimiScore1,Sea
              TotalTime  = timer:now_diff(EndTime, StartTime),
              io:format("TimeUsed:\n~p\n", [{{Time1/1000, Time1/TotalTime*100}, {Time2/1000, Time2/TotalTime*100},
                                             {Time3/1000, Time3/TotalTime*100}, {Time4/1000, Time4/TotalTime*100}, 
-                                            TotalTime/1000}])
-             %%display_clones_by_freq(lists:reverse(Cs), "Similar")
+                                            TotalTime/1000}]),
+             display_clones_by_freq(lists:reverse(Cs), "Similar")
     end,
     {ok, "Similar code detection finished."}.
 
@@ -428,9 +428,10 @@ clone_check_loop(Cs, CsRanges) ->
             clone_check_loop(Clones1++Cs, CsRanges);
 	{get_clones, From} ->
 	    io:format("TIME3:\n~p\n", [time()]),
-	    Cs1=[{AbsRanges, Len, Freq, AntiUnifier}||
+            Cs1 = remove_sub_clones(Cs),
+	    Cs2=[{AbsRanges, Len, Freq, AntiUnifier}||
 		    {_, {Len, Freq}, AntiUnifier,AbsRanges}<-Cs],
-	    From ! {self(), Cs1},
+            From ! {self(), Cs2},
 	    clone_check_loop(Cs, CsRanges);       
 	stop ->
             ets:delete(clone_tab),
@@ -2401,7 +2402,15 @@ pforeach_1(Fun, Parent, X) ->
 
 pforeach_wait(_S,0) -> ok;
 pforeach_wait(S,N) ->
-    io:format("wait for N:\n~p\n", [{N, erlang:statistics(run_queue)}]),
+ %%   io:format("wait for N:\n~p\n", [{N,  process_info1(processes()), erlang:statistics(run_queue)}]),
     receive
         S -> pforeach_wait(S,N-1)
     end.
+
+process_info1(Pids) ->
+    Res=[process_info(Pid, [initial_call, status, message_queue_len,current_function, messages])||Pid<-Pids],
+    [Info||Info<-Res, element(1,element(2, hd(Info)))==sim_code_v23 orelse 
+               element(1,element(2, hd(Info)))==para_lib
+    ].
+
+
