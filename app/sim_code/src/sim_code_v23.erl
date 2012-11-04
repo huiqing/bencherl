@@ -358,22 +358,25 @@ hash_loop(NextSeqNo) ->
 	    {ok, OutFileName} = search_for_clones(Dir, Thresholds),
             From ! {self(), {ok, OutFileName}},
             hash_loop(NextSeqNo);
-	{get_clone_in_range, From, {Ranges, Len, Freq}} ->
-	    F0 = fun ({ExprSeqId, ExprIndex}, L) ->
-			 [{ExprSeqId, {M, F, A}, Exprs}] = ets:lookup(expr_seq_hash_tab, ExprSeqId),
-			 Es = lists:sublist(Exprs, ExprIndex, L),
-			 [{{M,F,A,Index}, Toks, {{StartLoc, EndLoc}, StartLine}, IsNew}
-			  || {{Index, Toks, {StartLoc, EndLoc}, StartLine, IsNew}, _HashIndex} <- Es]
-		 end,
-	    C1 = {[F0(R, Len) || R <- Ranges], {Len, Freq}},
-	    From ! {self(), C1},
-	   %% hash_loop({NextSeqNo, NewData});
-            hash_loop(NextSeqNo);
+	%% {get_clone_in_range, From, {Ranges, Len, Freq}} ->
+	%%     C1 = get_clone_in_range({Ranges, Len, Freq}),
+	%%     From ! {self(), C1},
+	%%    %% hash_loop({NextSeqNo, NewData});
+        %%     hash_loop(NextSeqNo);
 	stop ->
             ets:delete(expr_hash_tab),
             ets:delete(expr_seq_hash_tab),
             ok
     end.
+
+get_clone_in_range(C={Ranges, Len, Freq}) ->
+    F0 = fun ({ExprSeqId, ExprIndex}, L) ->
+		 [{ExprSeqId, {M, F, A}, Exprs}] = ets:lookup(expr_seq_hash_tab, ExprSeqId),
+		 Es = lists:sublist(Exprs, ExprIndex, L),
+		 [{{M,F,A,Index}, Toks, {{StartLoc, EndLoc}, StartLine}, IsNew}
+		  || {{Index, Toks, {StartLoc, EndLoc}, StartLine, IsNew}, _HashIndex} <- Es]
+	 end,
+    {[F0(R, Len) || R <- Ranges], {Len, Freq}}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%                                                                    %%
@@ -479,7 +482,7 @@ examine_clone_candidates(Cs, Thresholds, CloneCheckerPid, HashPid) ->
  
 examine_a_clone_candidate({C,Nth},Thresholds,CloneCheckerPid,HashPid) ->
    %% output_progress_msg(Nth), 
-    C1 = get_clone_in_range(HashPid,C),
+    C1 = get_clone_in_range(C),
     MinToks = Thresholds#threshold.min_toks, 
     MinFreq = Thresholds#threshold.min_freq, 
     case remove_short_clones(C1,MinToks,MinFreq) of
