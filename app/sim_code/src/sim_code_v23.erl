@@ -306,7 +306,7 @@ start_hash_process() ->
 
 init_hash_loop() ->
     ets:new(expr_hash_tab, [named_table, protected, {keypos, 1}, set,{read_concurrency, true}]),
-    ets:new(expr_seq_hash_tab, [named_table, protected, {keypos,1}, ordered_set,{read_concurrency, true}]),
+    ets:new(expr_seq_hash_tab, [named_table, protected, {keypos,1}, set,{read_concurrency, true}]),
     hash_loop(1).
 
 %% Get initial clone candidates.    
@@ -1234,7 +1234,8 @@ search_for_clones(Dir, Thresholds) ->
     MinLen = Thresholds#threshold.min_len,
     MinFreq= Thresholds#threshold.min_freq,
     NumOfIndexStrs=integer_to_list(ets:info(expr_seq_hash_tab, size))++"\r\n",
-    Data = ets:tab2list(expr_seq_hash_tab),
+    Data = lists:keysort(1, ets:tab2list(expr_seq_hash_tab)),
+    %% io:format("Data:\n~p\n",[Data]),
     case Data of 
         [] ->
             OutFileName = filename:join(Dir, "wrangler_suffix_tree"),
@@ -1244,6 +1245,7 @@ search_for_clones(Dir, Thresholds) ->
             IndexStr = NumOfIndexStrs++lists:append([integer_list_to_string(Is)
                                                      ||{_SeqNo, _FFA, ExpHashIndexPairs} <- Data,
                                                        {_, Is}<-[lists:unzip(ExpHashIndexPairs)]]),
+            %% io:format("IndexStr:\n~p\n", [IndexStr]),
             SuffixTreeExec = filename:join(code:priv_dir(wrangler), "gsuffixtree"),
             wrangler_suffix_tree:get_clones_by_suffix_tree_inc(Dir, IndexStr, MinLen,
                                                                MinFreq, 1, SuffixTreeExec)
@@ -2399,7 +2401,7 @@ pforeach_1(Fun, Parent, X) ->
 
 pforeach_wait(_S,0) -> ok;
 pforeach_wait(S,N) ->
-    io:format("wait for N:\n~p\n", [{N, erlang:statistics(run_queue)}]),
+   %% io:format("wait for N:\n~p\n", [{N, erlang:statistics(run_queue)}]),
     receive
         S -> pforeach_wait(S,N-1)
     end.
