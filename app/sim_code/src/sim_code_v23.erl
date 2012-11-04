@@ -2401,7 +2401,7 @@ pforeach_1(Fun, Parent, X) ->
 
 pforeach_wait(_S,0) -> ok;
 pforeach_wait(S,N) ->
-   %% io:format("wait for N:\n~p\n", [{N, erlang:statistics(run_queue)}]),
+    io:format("wait for N:\n~p\n", [{N, erlang:statistics(run_queue)}]),
     receive
         S -> pforeach_wait(S,N-1)
     end.
