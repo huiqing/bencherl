@@ -400,11 +400,9 @@ add_new_clones(Pid, Clones) ->
     Pid ! {add_clone, Clones}.
 
 get_final_clone_classes(Pid) ->
-    io:format("TIME2:\n~p\n", [time()]),
     Pid ! {get_clones, self()},
     receive
         {Pid, Cs} ->
-            io:format("TIME4:\n~p\n", [time()]),
             Cs
     end.
 
@@ -415,7 +413,6 @@ clone_check_loop(Cs, CsRanges) ->
 		     || Clone <- Clones],
             clone_check_loop(Clones1++Cs, CsRanges);
 	{get_clones, From} ->
-	    io:format("TIME3:\n~p\n", [time()]),
             Time1 = now(),
             Cs1 = remove_sub_clones(Cs),
             Time2 = now(),
