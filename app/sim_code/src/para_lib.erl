@@ -25,18 +25,6 @@ pmap(Fun, List, Size) ->
         {Pid, Res}-> Res
     end.
 
-%% pmap_v1(Parent, Fun, List,Size) when Size=<1->
-%%     Pids=[spawn_link(?MODULE, pmap_1, [Fun, Self, X])
-%%              ||X<-List],
-%%     [receive {Pid, Result} ->
-%%              Result end|| Pid<-Pids];    
-%% pmap_v1(Parent, Fun, List, Size) ->
-%%     ChoppedList = chop_a_list(List, Size),
-%%     Pids=[spawn_link(?MODULE, pmap_2, [Fun, Self, SubList])
-%%           ||SubList<-ChoppedList],
-%%     [receive {Pid, Result} ->
-%%             Result end|| Pid<-Pids].
-
 pmap_v(Fun, List,Size) when Size=<1->
     Self = self(),
     Pids=[spawn_link(?MODULE, pmap_1, [Fun, Self, X])

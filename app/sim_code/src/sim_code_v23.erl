@@ -35,10 +35,12 @@
 
 -export([ gen_initial_clone_candidates/3,
           generalise_and_hash_ast/5,
-          check_clone_candidates/3]).
+          check_clone_candidates/2]).
 
 
 -export([init_hash_loop/0, init_clone_check/0, init_ast_loop/1]).
+
+-export([display_clones_by_freq/2, output_progress_msg/1]).
 
 -include_lib("wrangler/include/wrangler_internal.hrl").
 
@@ -113,7 +115,7 @@ sim_code_detection_1(Files, Thresholds, HashPid, ASTPid, SearchPaths, TabWidth) 
     ?wrangler_io("\nNumber of initial clone candidates: ~p\n", [length(Cs)]),
     
     ?wrangler_io("\nChecking clone candidates ... \n", []),
-    {Time4, Res} =timer:tc(?MODULE, check_clone_candidates, [Thresholds, HashPid, Cs]),
+    {Time4, Res} =timer:tc(?MODULE, check_clone_candidates, [Thresholds, Cs]),
     {Time2, Time3, Time4, Res}.
     
 gen_initial_clone_candidates(Files, Thresholds, HashPid) ->
@@ -129,7 +131,6 @@ gen_initial_clone_candidates(Files, Thresholds, HashPid) ->
     process_initial_clones(Cs0).
    
 process_initial_clones(Cs) ->
-    io:format("\n~p\n", [{length(sets:to_list(sets:from_list(Cs))), length(Cs)}]),
     [begin
 	 Rs1 =sets:to_list(sets:from_list(Rs)),
 	 {Rs1, Len, length(Rs1)}
@@ -317,12 +318,6 @@ get_clone_candidates(Pid, Thresholds, Dir) ->
 	{Pid, {ok, OutFileName}}->
 	    {ok, OutFileName}
     end.
-get_clone_in_range(Pid, C) ->
-    Pid! {get_clone_in_range, self(), C},
-    receive
-	{Pid, C1} ->
-	    C1
-    end.
 stop_hash_process(Pid) ->
     Pid!stop.
 
@@ -359,18 +354,13 @@ hash_loop(NextSeqNo) ->
 	    {ok, OutFileName} = search_for_clones(Dir, Thresholds),
             From ! {self(), {ok, OutFileName}},
             hash_loop(NextSeqNo);
-	%% {get_clone_in_range, From, {Ranges, Len, Freq}} ->
-	%%     C1 = get_clone_in_range({Ranges, Len, Freq}),
-	%%     From ! {self(), C1},
-	%%    %% hash_loop({NextSeqNo, NewData});
-        %%     hash_loop(NextSeqNo);
 	stop ->
             ets:delete(expr_hash_tab),
             ets:delete(expr_seq_hash_tab),
             ok
     end.
 
-get_clone_in_range(C={Ranges, Len, Freq}) ->
+get_clone_in_range(_C={Ranges, Len, Freq}) ->
     F0 = fun ({ExprSeqId, ExprIndex}, L) ->
 		 [{ExprSeqId, {M, F, A}, Exprs}] = ets:lookup(expr_seq_hash_tab, ExprSeqId),
 		 Es = lists:sublist(Exprs, ExprIndex, L),
@@ -386,10 +376,10 @@ get_clone_in_range(C={Ranges, Len, Freq}) ->
 %%                                                                    %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-check_clone_candidates(Thresholds, HashPid, Cs) ->
+check_clone_candidates(Thresholds, Cs) ->
     CloneCheckerPid = start_clone_check_process(),
     %% examine each clone candiate and filter false positives.
-    Cs2 = examine_clone_candidates(Cs, Thresholds, CloneCheckerPid, HashPid),
+    Cs2 = examine_clone_candidates(Cs, Thresholds, CloneCheckerPid),
     Cs3 = combine_clones_by_au(Cs2),
     stop_clone_check_process(CloneCheckerPid),
     [{R, L, F, C}||{R, L, F, C}<-Cs3, length(R)>=2].
@@ -423,13 +413,14 @@ clone_check_loop(Cs, CsRanges) ->
 	{add_clone,  {_Candidate, Clones}} ->
             Clones1=[get_clone_class_in_absolute_locs(Clone) 
 		     || Clone <- Clones],
-            %% {Clones2, Clones2Ranges} = non_sub_clones(Clones1, CsRanges),
-            %% {Cs1, Cs1Ranges} = non_sub_clones(Cs, Clones2Ranges),
-            %% clone_check_loop(Clones2++Cs1, Clones2Ranges++Cs1Ranges);
             clone_check_loop(Clones1++Cs, CsRanges);
 	{get_clones, From} ->
 	    io:format("TIME3:\n~p\n", [time()]),
+            Time1 = now(),
             Cs1 = remove_sub_clones(Cs),
+            Time2 = now(),
+            io:format("Time to remove sub clones:~p\n", [timer:now_diff(Time2, Time1)/1000]),
+            io:format("No of clones:\n~p\n", [{length(Cs), length(Cs1)}]),
 	    Cs2=[{AbsRanges, Len, Freq, AntiUnifier}||
 		    {_, {Len, Freq}, AntiUnifier,AbsRanges}<-Cs1],
             From ! {self(), Cs2},
@@ -471,24 +462,19 @@ clone_check_loop(Cs, CsRanges) ->
 %% Refactoring3: refactored to remove the dependences between consecutive recursions.
 %% Refactoring4: turn recursive function into lists:foreach.
 %% Refactoring5: turn lists:foreach into para_lib:pforeach.
-examine_clone_candidates(Cs, Thresholds, CloneCheckerPid, HashPid) ->
+examine_clone_candidates(Cs, Thresholds, CloneCheckerPid) ->
     NumberedCs = lists:zip(Cs, lists:seq(1, length(Cs))),
     Time1 =now(),
     pforeach(fun({C, Nth}) ->
-                     {Time, _}=timer:tc(?MODULE,examine_a_clone_candidate,[{C,Nth},Thresholds, CloneCheckerPid, HashPid]),
-                     case Time/1000 >80000 of 
-                         true ->
-                             io:format("exmaine a clone candidate:~p\n", [{Time/1000, C}]);
-                         false ->
-                             io:format("exmaine a clone candidate:~p\n", [Time/1000])
-                     end
+                     examine_a_clone_candidate({C,Nth},Thresholds,
+                                               CloneCheckerPid)
              end,NumberedCs),
     Time2 = now(),
     TotalTime  = timer:now_diff(Time2, Time1),
     io:format("Time for clone examination:~p\n", [TotalTime/1000]),
     get_final_clone_classes(CloneCheckerPid).
- 
-examine_a_clone_candidate({C,Nth},Thresholds,CloneCheckerPid,HashPid) ->
+
+examine_a_clone_candidate({C,_Nth},Thresholds,CloneCheckerPid) ->
    %% output_progress_msg(Nth), 
     C1 = get_clone_in_range(C),
     MinToks = Thresholds#threshold.min_toks, 
@@ -512,15 +498,6 @@ output_progress_msg(Num) ->
      	_-> ok
      end.
    
-hash_a_clone_candidate(_C={Ranges, {_Len, _Freq}}) ->
-    F = fun({MFAI, Toks, {Loc, _StartLine}, _IsNew}) ->
-		{MFAI, Toks, Loc}
-	end,
-    erlang:md5(lists:usort(
-		 [erlang:md5(lists:flatten(
-			       io_lib:format(
-				 "~p", [[F(E)||E<-R]])))
-		  ||R<-Ranges])).
 %% examine a  clone candidate.
 examine_a_clone_candidate(_C={Ranges, {_Len, _Freq}}, Thresholds) ->
   %%  RangesWithExprAST=[attach_expr_ast_to_ranges(R)|| R<-Ranges],
@@ -534,13 +511,6 @@ examine_a_clone_candidate(_C={Ranges, {_Len, _Freq}}, Thresholds) ->
                                       {Rs1, AU1} = attach_fun_call_to_range(Rs, AU, FromSameFile),
                                       {Rs1, {Len, length(Rs1)}, AU1}
                               end, Clones),
-     %% ClonesWithAU = [begin
-     %%    		FromSameFile=from_same_file(Rs),
-     %%                    AU= get_anti_unifier(Info, FromSameFile),
-     %%                    {Rs1, AU1} = attach_fun_call_to_range(Rs, AU, FromSameFile),
-     %%                    {Rs1, {Len, length(Rs1)}, AU1}
-     %%    	    end
-     %%    	    || {Rs, {Len, _}, Info} <- Clones],
     [{Rs1, {Len, F}, AU1}||{Rs1, {Len, F}, AU1}<-ClonesWithAU,
                            F>=Thresholds#threshold.min_freq].
  
@@ -558,6 +528,7 @@ examine_clone_class_members(RangesWithExprAST, Thresholds, Acc)
     %% than the min_freq threshold, so the examination
     %% finishes, and sub-clones are removed.
     remove_sub_clones(Acc);
+
 
 examine_clone_class_members(RangesWithExprAST, Thresholds,Acc) ->
     %% Take the first clone member and  try to anti_unify other 
@@ -1101,28 +1072,27 @@ make_fun_call(FunName, Pats, Subst, FromSameFile) ->
 %%                                                                  %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 remove_sub_clones(Cs) ->
-    remove_sub_clones(lists:reverse(lists:keysort(2,Cs)),[],[]).
+    OrderedCs = lists:reverse(lists:keysort(2,Cs)),
+    remove_sub_clones(OrderedCs, [],[]).
+   
 remove_sub_clones([], _, Acc_Cs) ->
     lists:reverse(Acc_Cs);
 remove_sub_clones([C|Cs], AccRanges,Acc_Cs) ->
     CloneRanges = element(1, C),
-    case is_sub_clone(CloneRanges, AccRanges) of
+    {Len, Freq} = element(2,C),
+    case is_sub_clone_1({CloneRanges,{Len, Freq}},AccRanges) of
 	true -> 
 	    remove_sub_clones(Cs, AccRanges, Acc_Cs);
-	false ->remove_sub_clones(Cs, [CloneRanges|AccRanges], [C|Acc_Cs])
+	false ->
+            remove_sub_clones(Cs, [{CloneRanges, {Len, Freq}}|AccRanges], 
+                              [C|Acc_Cs])
     end.
 
-non_sub_clones(Clones1, Clones2Ranges) ->
-    Res =para_lib:pmap(fun(C1) ->
-                            C1Ranges = element(1, C1),
-                            case is_sub_clone(C1Ranges, Clones2Ranges) of 
-                                true -> [];
-                                false -> [{C1, C1Ranges}]
-                            end
-                    end, Clones1),
-    lists:unzip(lists:append(Res)).
+is_sub_clone_1(CloneRanges, OtherRanges) ->
+    pany(fun(R)->
+                 is_sub_ranges(CloneRanges, R)
+         end, OtherRanges, 20).
 
- 
 is_sub_clone(_CloneRanges, []) ->
     false;
 is_sub_clone(CloneRanges, [CRanges|CsRanges]) ->
@@ -1133,13 +1103,20 @@ is_sub_clone(CloneRanges, [CRanges|CsRanges]) ->
             is_sub_clone(CloneRanges, CsRanges)
     end.
 
-is_sub_ranges(Ranges1, Ranges2) ->
-    lists:all(fun (R1)  -> 
-		      lists:any(fun (R2) ->
-					R1--R2==[]
-				end, Ranges2) 
-	      end, Ranges1).
+is_sub_ranges({Ranges1,{Len1, Freq1}}, 
+              {Ranges2, {Len2, Freq2}}) ->
+    case Len1=<Len2 andalso Freq1=<Freq2 of 
+        true ->
+            lists:all(fun (R1)  -> 
+                              lists:any(fun (R2) ->
+                                                R1--R2==[]
+                                        end, Ranges2) 
+                      end, Ranges1);
+        false ->false 
+    end.
+            
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 get_var_define_pos(V) ->
     {value, {def, DefinePos}} = lists:keysearch(def, 1, wrangler_syntax:get_ann(V)),
@@ -1525,9 +1502,6 @@ para_call(FuncArgPairs) ->
     [receive {Pid, Result} ->
             Result end|| Pid<-Pids].
           
-parse_files() -> 
-    quick_parse_annotate_file("./test/test.erl", [], 8).
-    
 quick_parse_annotate_file(FName, SearchPaths, TabWidth) ->
     FileFormat = file_format(FName),
     [Ms, ParseRes] = para_call([{fun()->
@@ -1543,20 +1517,6 @@ quick_parse_annotate_file(FName, SearchPaths, TabWidth) ->
 	{error, Reason} -> 
             erlang:error(Reason)
     end.
- 
- 
-quick_parse_annotate_file1(FName, SearchPaths, TabWidth) ->
-    FileFormat = file_format(FName),
-    Ms=get_module_macros(FName, SearchPaths, TabWidth, FileFormat),
-    ParseRes = parse_a_file(FName, TabWidth, FileFormat),
-    case ParseRes of
-	{ok, Forms} ->
-            {AnnAST, Info} = annotate_bindings(FName, Forms,Ms, TabWidth),
-	    {ok, {AnnAST, Info}};
-	{error, Reason} -> 
-            erlang:error(Reason)
-    end.
-  
  
 get_module_macros(FName, SearchPaths, TabWidth, FileFormat) ->
     Dir = filename:dirname(FName),
@@ -2387,7 +2347,51 @@ adjust_implicit_fun_loc(T, Toks)->
 update_ann(Node, Ann) ->
     wrangler_misc:update_ann(Node, Ann).
 
+pany(Fun, List, Size) ->
+    Self = self(),
+    Pid = spawn_link(?MODULE, pany_0, [Self, Fun, List,Size]),
+    receive 
+        {Pid, Res} -> Res
+    end.
 
+pany_0(Parent, Fun, List, Size) when Size=<1 ->
+    Self = self(),
+    _Pids = [spawn_link(?MODULE, pany_1, [Fun, Self, X])
+             || X <- List],
+    pany_wait(Parent, Self, length(List),false);
+pany_0(Parent, Fun, List, Size)->
+    Self = self(),
+    ChoppedList = para_lib:chop_a_list(List, Size),
+    _Pids = [spawn_link(?MODULE, pany_2, [Fun, Self,SubList])
+             || SubList<-ChoppedList],
+    pany_wait(Parent, Self, length(ChoppedList),false).
+   
+pany_1(Fun, Parent, X) ->
+    Res = (catch Fun(X)),
+    Parent ! {Parent,Res}.
+pany_2(Fun, Parent, SubList) ->
+    Res = (catch lists:any(fun(X) ->
+                                   Fun(X)
+                           end, SubList)),
+    Parent ! {Parent, Res}.
+
+pany_wait(Parent,Self,0,false) -> 
+    Parent!{Self, false};
+pany_wait(_Parent,_Self,0,true) -> 
+    ok;
+pany_wait(Parent,Self, N, Done) ->
+    receive
+        {Self,true} -> 
+            case Done of 
+                true -> 
+                    pany_wait(Parent, Self,N-1,Done);
+                false ->
+                    Parent ! {Self, true},
+                    pany_wait(Parent, Self, N-1, true)
+            end;
+        {Self,false} ->
+            pany_wait(Parent, Self, N-1, Done)
+    end.
 
 
 pforeach(Fun, List)->
@@ -2409,15 +2413,14 @@ pforeach_1(Fun, Parent, X) ->
 
 pforeach_wait(_S,0) -> ok;
 pforeach_wait(S,N) ->
- %%   io:format("wait for N:\n~p\n", [{N,  process_info1(processes()), erlang:statistics(run_queue)}]),
     receive
         S -> pforeach_wait(S,N-1)
     end.
 
-process_info1(Pids) ->
-    Res=[process_info(Pid, [initial_call, status, message_queue_len,current_function, messages])||Pid<-Pids],
-    [Info||Info<-Res, element(1,element(2, hd(Info)))==sim_code_v23 orelse 
-               element(1,element(2, hd(Info)))==para_lib
-    ].
+%% process_info1(Pids) ->
+%%     Res=[process_info(Pid, [initial_call, status, message_queue_len,current_function, messages])||Pid<-Pids],
+%%     [Info||Info<-Res, element(1,element(2, hd(Info)))==sim_code_v23 orelse 
+%%                element(1,element(2, hd(Info)))==para_lib
+%%     ].
 
 
