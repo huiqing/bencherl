@@ -1,0 +1,57 @@
+Generalise and hash ASTs ...
+
+Collecting initial clone candidates ...
+
+Number of initial clone candidates: 1360
+
+Checking clone candidates ... 
+Time for clone examination:11791.042
+Time to remove sub clones:927.339
+No of clones:
+{312,158}
+
+ clone detection finished with *** 157 *** clone(s) found.
+TimeUsed:
+{{37.542,0.11362494162806909},
+ {19897.39,60.221612522000044},
+ {364.613,1.1035408566894451},
+ {12734.65,38.54280173948884},
+ 33040.281}
+Generalise and hash ASTs ...
+
+Collecting initial clone candidates ...
+
+Number of initial clone candidates: 1347
+
+Checking clone candidates ... 
+Time for clone examination:11907.539
+Time to remove sub clones:749.325
+No of clones:
+{298,156}
+
+ clone detection finished with *** 156 *** clone(s) found.
+TimeUsed:
+{{39.552,0.12004217865506688},
+ {20014.413,60.744683986202794},
+ {222.977,0.6767456732901206},
+ {12670.105,38.45436407737804},
+ 32948.419}
+Generalise and hash ASTs ...
+
+Collecting initial clone candidates ...
+
+Number of initial clone candidates: 1358
+
+Checking clone candidates ... 
+Time for clone examination:12800.237
+Time to remove sub clones:840.693
+No of clones:
+{300,153}
+
+ clone detection finished with *** 153 *** clone(s) found.
+TimeUsed:
+{{41.839,0.12017077640535169},
+ {20752.276,59.60508422998031},
+ {365.202,1.0489401726806866},
+ {13655.441,39.22141894231392},
+ 34816.285}
